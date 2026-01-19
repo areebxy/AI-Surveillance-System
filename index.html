@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Surveillance System - People Counter</title>
+    
+    <!-- Load TensorFlow.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <!-- Load Posenet or COCO-SSD model -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <!-- Load Chart.js for the dashboard -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #121212;
+            --card-bg: #1e1e1e;
+            --text-color: #e0e0e0;
+            --accent-color: #00ff9d;
+            --danger-color: #ff4d4d;
+            --font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: var(--font-family);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        header {
+            background-color: var(--card-bg);
+            padding: 1rem 2rem;
+            border-bottom: 2px solid var(--accent-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 { margin: 0; font-size: 1.5rem; letter-spacing: 1px; }
+        .status-badge {
+            background: #333;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            color: #aaa;
+        }
+        .status-badge.ready { color: var(--accent-color); border: 1px solid var(--accent-color); }
+
+        /* Main Layout */
+        main {
+            display: grid;
+            grid-template-columns: 2fr 1fr; /* Video takes more space */
+            gap: 20px;
+            padding: 20px;
+            flex-grow: 1;
+        }
+
+        @media (max-width: 900px) {
+            main { grid-template-columns: 1fr; }
+        }
+
+        /* Cards */
+        .card {
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        /* Video Section */
+        .video-container {
+            position: relative;
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+            min-height: 400px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        video {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+        }
+
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+        }
+
+        button, input[type="file"]::file-selector-button {
+            background-color: #333;
+            color: white;
+            border: 1px solid #555;
+            padding: 10px 15px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.3s;
+            font-family: inherit;
+        }
+
+        button:hover, input[type="file"]::file-selector-button:hover {
+            background-color: var(--accent-color);
+            color: black;
+            border-color: var(--accent-color);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Dashboard Section */
+        .stat-box {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+        }
+
+        .count-number {
+            font-size: 4rem;
+            font-weight: bold;
+            color: var(--accent-color);
+            margin: 10px 0;
+        }
+
+        .log-container {
+            height: 200px;
+            overflow-y: auto;
+            border: 1px solid #333;
+            margin-top: 20px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+
+        .log-entry { margin-bottom: 5px; border-bottom: 1px solid #333; padding-bottom: 2px; }
+        .log-time { color: #888; margin-right: 10px; }
+
+        /* Loader */
+        #loader {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: var(--accent-color);
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>SURVEILLANCE <span style="color:var(--accent-color)">AI</span></h1>
+    <div id="modelStatus" class="status-badge">Loading Neural Network...</div>
+</header>
+
+<main>
+    <!-- Left Column: Video Feed -->
+    <section>
+        <div class="card">
+            <div class="video-container" id="videoWrapper">
+                <div id="loader">
+                    <p>Initializing TensorFlow.js...</p>
+                </div>
+                <!-- Video and Canvas will be injected/managed here -->
+                <video id="webcam" playsinline muted style="display:none;"></video>
+                <canvas id="overlay"></canvas>
+            </div>
+
+            <div class="controls">
+                <button id="btnWebcam" disabled>Start Webcam</button>
+                <button id="btnStop" disabled>Stop</button>
+                <label style="margin-left:auto; align-self:center; font-size:0.9rem;">
+                    Upload Video: 
+                    <input type="file" id="uploadVideo" accept="video/*" disabled>
+                </label>
+            </div>
+        </div>
+    </section>
+
+    <!-- Right Column: Dashboard -->
+    <section>
+        <div class="card">
+            <h3>Live Statistics</h3>
+            <div class="stat-box">
+                <div>Person Count</div>
+                <div class="count-number" id="liveCount">0</div>
+                <div style="font-size: 0.8rem; color:#888;">Detected in current frame</div>
+            </div>
+
+            <canvas id="chartCanvas" height="150"></canvas>
+
+            <h3>Activity Log</h3>
+            <div class="log-container" id="logArea">
+                <!-- JS writes logs here -->
+            </div>
+        </div>
+    </section>
+</main>
+
+<script>
+    /**
+     * MODULE: App State & Configuration
+     */
+    const AppState = {
+        model: null,
+        isVideoPlaying: false,
+        currentStream: null,
+        detectionInterval: null,
+        chartInterval: null,
+        history: [],
+        lastCount: 0
+    };
+
+    // DOM Elements
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('overlay');
+    const ctx = canvas.getContext('2d');
+    const liveCountDisplay = document.getElementById('liveCount');
+    const logArea = document.getElementById('logArea');
+    const loader = document.getElementById('loader');
+    const statusBadge = document.getElementById('modelStatus');
+    
+    // Buttons
+    const btnWebcam = document.getElementById('btnWebcam');
+    const btnStop = document.getElementById('btnStop');
+    const uploadInput = document.getElementById('uploadVideo');
+
+    // Chart Setup
+    const chartCtx = document.getElementById('chartCanvas').getContext('2d');
+    const trafficChart = new Chart(chartCtx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'People Detected',
+                data: [],
+                borderColor: '#00ff9d',
+                backgroundColor: 'rgba(0, 255, 157, 0.1)',
+                tension: 0.4,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: { beginAtZero: true, grid: { color: '#333' } },
+                x: { grid: { display: false } }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+
+    /**
+     * MODULE: Initialization & Model Loading
+     */
+    async function init() {
+        try {
+            // Load COCO-SSD model
+            AppState.model = await cocoSsd.load();
+            
+            // Update UI
+            loader.style.display = 'none';
+            video.style.display = 'block';
+            statusBadge.textContent = "System Ready";
+            statusBadge.classList.add('ready');
+            
+            btnWebcam.disabled = false;
+            uploadInput.disabled = false;
+            
+            console.log("Model loaded successfully");
+        } catch (error) {
+            console.error("Error loading model:", error);
+            statusBadge.textContent = "Error Loading Model";
+        }
+    }
+
+    /**
+     * MODULE: Video Handling
+     */
+    btnWebcam.addEventListener('click', async () => {
+        stopVideo(); // Stop any existing source
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { width: 640, height: 480 } 
+            });
+            video.srcObject = stream;
+            AppState.currentStream = stream;
+            
+            video.onloadedmetadata = () => {
+                video.play();
+                startDetection();
+            };
+        } catch (err) {
+            alert("Error accessing webcam: " + err.message);
+        }
+    });
+
+    uploadInput.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files[0]) {
+            stopVideo();
+            const fileURL = URL.createObjectURL(e.target.files[0]);
+            video.srcObject = null;
+            video.src = fileURL;
+            video.loop = true;
+            
+            video.onloadedmetadata = () => {
+                video.play();
+                startDetection();
+            };
+        }
+    });
+
+    btnStop.addEventListener('click', stopVideo);
+
+    function stopVideo() {
+        AppState.isVideoPlaying = false;
+        btnWebcam.disabled = false;
+        btnStop.disabled = true;
+        
+        if (video.srcObject) {
+            const tracks = video.srcObject.getTracks();
+            tracks.forEach(track => track.stop());
+            video.srcObject = null;
+        }
+        video.pause();
+        video.src = "";
+        
+        // Clear Canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        cancelAnimationFrame(AppState.detectionInterval);
+        clearInterval(AppState.chartInterval);
+    }
+
+    /**
+     * MODULE: Detection Logic
+     */
+    function startDetection() {
+        AppState.isVideoPlaying = true;
+        btnWebcam.disabled = true;
+        btnStop.disabled = false;
+
+        // Set canvas dimensions to match video
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        detectFrame();
+        
+        // Start logging data to chart every 2 seconds
+        AppState.chartInterval = setInterval(updateDashboard, 2000);
+    }
+
+    async function detectFrame() {
+        if (!AppState.isVideoPlaying) return;
+
+        // Detect objects
+        const predictions = await AppState.model.detect(video);
+
+        // Filter for 'person' class only
+        const people = predictions.filter(p => p.class === 'person');
+        const count = people.length;
+
+        // Update State
+        AppState.lastCount = count;
+
+        // Draw
+        renderPredictions(people);
+        updateUI(count);
+
+        // Loop
+        AppState.detectionInterval = requestAnimationFrame(detectFrame);
+    }
+
+    function renderPredictions(predictions) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.font = '16px sans-serif';
+        ctx.textBaseline = 'top';
+
+        predictions.forEach(prediction => {
+            const [x, y, width, height] = prediction.bbox;
+
+            // Draw bounding box
+            ctx.strokeStyle = '#00ff9d';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, width, height);
+
+            // Draw label background
+            ctx.fillStyle = '#00ff9d';
+            const textWidth = ctx.measureText(`Person: ${Math.round(prediction.score*100)}%`).width;
+            ctx.fillRect(x, y, textWidth + 10, 20);
+
+            // Draw text
+            ctx.fillStyle = '#000000';
+            ctx.fillText(`Person: ${Math.round(prediction.score*100)}%`, x + 5, y + 2);
+        });
+    }
+
+    function updateUI(count) {
+        liveCountDisplay.textContent = count;
+        if (count > 0) {
+            liveCountDisplay.style.color = '#ff4d4d'; // Red if people detected
+        } else {
+            liveCountDisplay.style.color = '#00ff9d'; // Green if safe
+        }
+    }
+
+    /**
+     * MODULE: Dashboard & Logging
+     */
+    function updateDashboard() {
+        const now = new Date();
+        const timeLabel = now.getHours() + ":" + String(now.getMinutes()).padStart(2, '0') + ":" + String(now.getSeconds()).padStart(2, '0');
+
+        // Update Chart
+        const chart = trafficChart;
+        if (chart.data.labels.length > 10) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+        }
+        chart.data.labels.push(timeLabel);
+        chart.data.datasets[0].data.push(AppState.lastCount);
+        chart.update();
+
+        // Add Log Entry only if count changes or randomly to keep it alive
+        if (AppState.lastCount > 0) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">[${timeLabel}]</span> Detected <strong>${AppState.lastCount}</strong> person(s).`;
+            logArea.prepend(entry);
+            
+            // Keep log clean
+            if (logArea.childElementCount > 50) logArea.lastChild.remove();
+        }
+    }
+
+    // Run Initialization
+    init();
+
+</script>
+
+</body>
+</html>
