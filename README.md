@@ -59,4 +59,6 @@ This project was developed as part of a **hackathon** to demonstrate the capabil
 ```text
 AI-Surveillance-System/
 ├── index.html
-└── README.md
+├── README.md
+├── LICENSE
+└── demo.gif
