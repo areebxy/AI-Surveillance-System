@@ -1,15 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Surveillance System - People Counter</title>
+    <title>Enhanced Surveillance System</title>
     
-    <!-- Load TensorFlow.js -->
+    <!-- Load TensorFlow.js and COCO-SSD -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-    <!-- Load Posenet or COCO-SSD model -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
-    <!-- Load Chart.js for the dashboard -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
@@ -19,8 +18,11 @@
             --text-color: #e0e0e0;
             --accent-color: #00ff9d;
             --danger-color: #ff4d4d;
+            --warning-color: #ffaa00;
             --font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
+
+        * { box-sizing: border-box; }
 
         body {
             background-color: var(--bg-color);
@@ -33,7 +35,6 @@
             min-height: 100vh;
         }
 
-        /* Header */
         header {
             background-color: var(--card-bg);
             padding: 1rem 2rem;
@@ -41,9 +42,18 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
         }
 
         h1 { margin: 0; font-size: 1.5rem; letter-spacing: 1px; }
+        
+        .header-right {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
         .status-badge {
             background: #333;
             padding: 5px 10px;
@@ -53,10 +63,26 @@
         }
         .status-badge.ready { color: var(--accent-color); border: 1px solid var(--accent-color); }
 
-        /* Main Layout */
+        .alert-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #555;
+            transition: background 0.3s;
+        }
+        .alert-indicator.active { 
+            background: var(--danger-color);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+        }
+
         main {
             display: grid;
-            grid-template-columns: 2fr 1fr; /* Video takes more space */
+            grid-template-columns: 2fr 1fr;
             gap: 20px;
             padding: 20px;
             flex-grow: 1;
@@ -66,22 +92,25 @@
             main { grid-template-columns: 1fr; }
         }
 
-        /* Cards */
         .card {
             background-color: var(--card-bg);
             border-radius: 8px;
             padding: 15px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
         }
 
-        /* Video Section */
+        /* Video Container Fixed to prevent aspect ratio issues */
         .video-container {
             position: relative;
             width: 100%;
             border-radius: 8px;
             overflow: hidden;
             background: #000;
-            min-height: 400px;
+            /* Allow container to shrink to content height */
+            height: auto;
+            min-height: 300px; 
             display: flex;
             align-items: center;
             justify-content: center;
@@ -91,21 +120,35 @@
             display: block;
             width: 100%;
             height: auto;
+            max-height: 80vh; /* Prevent video from getting too tall on large screens */
         }
 
         canvas {
             position: absolute;
             top: 0;
             left: 0;
-            width: 100%;
-            height: 100%;
+            /* Width/Height handled by JS to ensure alignment */
+            pointer-events: none;
             z-index: 10;
+        }
+
+        .video-info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            z-index: 20;
+            pointer-events: none;
         }
 
         .controls {
             margin-top: 15px;
             display: flex;
             gap: 10px;
+            flex-wrap: wrap;
         }
 
         button, input[type="file"]::file-selector-button {
@@ -117,9 +160,10 @@
             border-radius: 4px;
             transition: all 0.3s;
             font-family: inherit;
+            font-size: 0.9rem;
         }
 
-        button:hover, input[type="file"]::file-selector-button:hover {
+        button:hover:not(:disabled), input[type="file"]::file-selector-button:hover {
             background-color: var(--accent-color);
             color: black;
             border-color: var(--accent-color);
@@ -130,107 +174,307 @@
             cursor: not-allowed;
         }
 
-        /* Dashboard Section */
+        button.recording {
+            background-color: var(--danger-color);
+            border-color: var(--danger-color);
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.7; }
+        }
+
+        .settings-panel {
+            margin-top: 15px;
+            padding: 15px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+        }
+
+        .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .setting-row label { font-size: 0.9rem; }
+
+        input[type="number"], input[type="range"] {
+            background: #333;
+            border: 1px solid #555;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            width: 100px;
+        }
+
+        input[type="range"] { width: 150px; }
+
         .stat-box {
             text-align: center;
-            margin-bottom: 20px;
-            padding: 20px;
+            margin-bottom: 15px;
+            padding: 15px;
             background: rgba(255,255,255,0.05);
             border-radius: 8px;
         }
 
         .count-number {
-            font-size: 4rem;
+            font-size: 3rem;
             font-weight: bold;
             color: var(--accent-color);
             margin: 10px 0;
+            transition: color 0.3s;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .mini-stat {
+            background: rgba(255,255,255,0.05);
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .mini-stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--accent-color);
+        }
+
+        .mini-stat-label {
+            font-size: 0.75rem;
+            color: #888;
+            margin-top: 5px;
         }
 
         .log-container {
-            height: 200px;
+            height: 180px;
             overflow-y: auto;
             border: 1px solid #333;
-            margin-top: 20px;
+            margin-top: 15px;
             padding: 10px;
             font-family: monospace;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
+            background: rgba(0,0,0,0.2);
         }
 
-        .log-entry { margin-bottom: 5px; border-bottom: 1px solid #333; padding-bottom: 2px; }
+        .log-entry { 
+            margin-bottom: 5px; 
+            border-bottom: 1px solid #333; 
+            padding-bottom: 2px;
+        }
+        
         .log-time { color: #888; margin-right: 10px; }
+        .log-alert { color: var(--danger-color); font-weight: bold; }
+        .log-warning { color: var(--warning-color); }
+        .log-success { color: var(--accent-color); }
 
-        /* Loader */
         #loader {
+            position: absolute;
             display: flex;
             flex-direction: column;
             align-items: center;
             color: var(--accent-color);
+            z-index: 30;
+        }
+
+        .alert-box {
+            background: var(--danger-color);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            display: none;
+            animation: slideDown 0.3s ease-out;
+        }
+
+        @keyframes slideDown {
+            from { transform: translateY(-10px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .alert-box.show { display: block; }
+
+        .screenshot-list {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+
+        .screenshot-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 5px;
+            border-bottom: 1px solid #333;
+            font-size: 0.85rem;
+        }
+
+        .screenshot-thumb {
+            width: 60px;
+            height: 40px;
+            object-fit: cover;
+            border-radius: 4px;
+        }
+
+        .download-link {
+            color: var(--accent-color);
+            text-decoration: none;
+            margin-left: auto;
+        }
+
+        .download-link:hover { text-decoration: underline; }
+
+        h3 {
+            margin-top: 0;
+            font-size: 1.1rem;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
         }
     </style>
 </head>
 <body>
 
 <header>
-    <h1>SURVEILLANCE <span style="color:var(--accent-color)">AI</span></h1>
-    <div id="modelStatus" class="status-badge">Loading Neural Network...</div>
+    <h1>DX TECHIES <span style="color:var(--accent-color)"></span></h1>
+    <div class="header-right">
+        <div style="display:flex; align-items:center; gap:8px;">
+            <div class="alert-indicator" id="alertIndicator"></div>
+            <span id="alertText" style="font-size:0.85rem;">Monitoring</span>
+        </div>
+        <div id="modelStatus" class="status-badge">Loading Neural Network...</div>
+    </div>
 </header>
 
 <main>
-    <!-- Left Column: Video Feed -->
     <section>
         <div class="card">
             <div class="video-container" id="videoWrapper">
                 <div id="loader">
                     <p>Initializing TensorFlow.js...</p>
                 </div>
-                <!-- Video and Canvas will be injected/managed here -->
+                <!-- Added playsinline for mobile IOS support -->
                 <video id="webcam" playsinline muted style="display:none;"></video>
                 <canvas id="overlay"></canvas>
+                <div class="video-info" id="videoInfo" style="display:none;">
+                    FPS: <span id="fpsCounter">0</span> | Resolution: <span id="resInfo">-</span>
+                </div>
             </div>
 
             <div class="controls">
-                <button id="btnWebcam" disabled>Start Webcam</button>
-                <button id="btnStop" disabled>Stop</button>
+                <button id="btnWebcam" disabled>📹 Start Webcam</button>
+                <button id="btnStop" disabled>⏹ Stop</button>
+                <button id="btnScreenshot" disabled>📸 Screenshot</button>
+                <button id="btnRecord" disabled>⏺ Record</button>
                 <label style="margin-left:auto; align-self:center; font-size:0.9rem;">
-                    Upload Video: 
+                    📁 Upload: 
                     <input type="file" id="uploadVideo" accept="video/*" disabled>
                 </label>
+            </div>
+
+            <div class="settings-panel">
+                <h3>⚙️ Detection Settings</h3>
+                <div class="setting-row">
+                    <label>Alert Threshold (people):</label>
+                    <input type="number" id="thresholdInput" value="3" min="1" max="50">
+                </div>
+                <div class="setting-row">
+                    <label>Confidence Level:</label>
+                    <input type="range" id="confidenceSlider" min="10" max="90" value="50">
+                    <span id="confidenceValue">50%</span>
+                </div>
+                <div class="setting-row">
+                    <label>Detection Speed:</label>
+                    <select id="speedSelect" style="background:#333; color:white; border:1px solid #555; padding:5px; border-radius:4px;">
+                        <option value="fast">Fast (Lower Accuracy)</option>
+                        <option value="normal" selected>Normal</option>
+                        <option value="accurate">Accurate (Slower)</option>
+                    </select>
+                </div>
+                <div class="setting-row">
+                    <label>Sound Alerts:</label>
+                    <input type="checkbox" id="soundToggle" checked>
+                </div>
             </div>
         </div>
     </section>
 
-    <!-- Right Column: Dashboard -->
     <section>
         <div class="card">
-            <h3>Live Statistics</h3>
-            <div class="stat-box">
-                <div>Person Count</div>
-                <div class="count-number" id="liveCount">0</div>
-                <div style="font-size: 0.8rem; color:#888;">Detected in current frame</div>
+            <div class="alert-box" id="alertBox">
+                ⚠️ <strong>ALERT:</strong> Crowd detected! Count exceeded threshold.
             </div>
 
-            <canvas id="chartCanvas" height="150"></canvas>
+            <h3>📊 Live Statistics</h3>
+            <div class="stat-box">
+                <div>Current Count</div>
+                <div class="count-number" id="liveCount">0</div>
+                <div style="font-size: 0.8rem; color:#888;">People in frame</div>
+            </div>
 
-            <h3>Activity Log</h3>
-            <div class="log-container" id="logArea">
-                <!-- JS writes logs here -->
+            <div class="stats-grid">
+                <div class="mini-stat">
+                    <div class="mini-stat-value" id="maxCount">0</div>
+                    <div class="mini-stat-label">Peak Count</div>
+                </div>
+                <div class="mini-stat">
+                    <div class="mini-stat-value" id="avgCount">0</div>
+                    <div class="mini-stat-label">Average</div>
+                </div>
+                <div class="mini-stat">
+                    <div class="mini-stat-value" id="totalDetections">0</div>
+                    <div class="mini-stat-label">Total Detections</div>
+                </div>
+                <div class="mini-stat">
+                    <div class="mini-stat-value" id="sessionTime">00:00</div>
+                    <div class="mini-stat-label">Session Time</div>
+                </div>
+            </div>
+
+            <div style="height: 150px;">
+                <canvas id="chartCanvas"></canvas>
+            </div>
+
+            <h3>📝 Activity Log</h3>
+            <div class="log-container" id="logArea"></div>
+
+            <h3>📷 Screenshots</h3>
+            <div class="screenshot-list" id="screenshotList">
+                <p style="color:#888; font-size:0.85rem; text-align:center;">No screenshots yet</p>
             </div>
         </div>
     </section>
 </main>
 
 <script>
-    /**
-     * MODULE: App State & Configuration
-     */
     const AppState = {
         model: null,
         isVideoPlaying: false,
         currentStream: null,
         detectionInterval: null,
         chartInterval: null,
+        sessionTimer: null,
         history: [],
-        lastCount: 0
+        lastCount: 0,
+        maxCount: 0,
+        totalDetections: 0,
+        sessionStart: null,
+        screenshots: [],
+        isRecording: false,
+        mediaRecorder: null,
+        recordedChunks: [],
+        frameCount: 0,
+        lastFrameTime: Date.now(),
+        confidenceThreshold: 0.5,
+        detectionDelay: 100,
+        lastAlertTime: 0 // Cooldown for sound
     };
 
     // DOM Elements
@@ -241,11 +485,30 @@
     const logArea = document.getElementById('logArea');
     const loader = document.getElementById('loader');
     const statusBadge = document.getElementById('modelStatus');
+    const videoInfo = document.getElementById('videoInfo');
+    const fpsCounter = document.getElementById('fpsCounter');
+    const resInfo = document.getElementById('resInfo');
+    const alertBox = document.getElementById('alertBox');
+    const alertIndicator = document.getElementById('alertIndicator');
+    const alertText = document.getElementById('alertText');
     
-    // Buttons
     const btnWebcam = document.getElementById('btnWebcam');
     const btnStop = document.getElementById('btnStop');
+    const btnScreenshot = document.getElementById('btnScreenshot');
+    const btnRecord = document.getElementById('btnRecord');
     const uploadInput = document.getElementById('uploadVideo');
+    
+    const thresholdInput = document.getElementById('thresholdInput');
+    const confidenceSlider = document.getElementById('confidenceSlider');
+    const confidenceValue = document.getElementById('confidenceValue');
+    const speedSelect = document.getElementById('speedSelect');
+    const soundToggle = document.getElementById('soundToggle');
+
+    const maxCountDisplay = document.getElementById('maxCount');
+    const avgCountDisplay = document.getElementById('avgCount');
+    const totalDetectionsDisplay = document.getElementById('totalDetections');
+    const sessionTimeDisplay = document.getElementById('sessionTime');
+    const screenshotList = document.getElementById('screenshotList');
 
     // Chart Setup
     const chartCtx = document.getElementById('chartCanvas').getContext('2d');
@@ -254,57 +517,76 @@
         data: {
             labels: [],
             datasets: [{
-                label: 'People Detected',
+                label: 'People',
                 data: [],
                 borderColor: '#00ff9d',
                 backgroundColor: 'rgba(0, 255, 157, 0.1)',
                 tension: 0.4,
-                fill: true
+                fill: true,
+                pointRadius: 0
             }]
         },
         options: {
             responsive: true,
+            maintainAspectRatio: false,
+            animation: false, // Performance optimization
             scales: {
-                y: { beginAtZero: true, grid: { color: '#333' } },
-                x: { grid: { display: false } }
+                y: { beginAtZero: true, grid: { color: '#333' }, ticks: { color: '#888' }, suggestedMax: 5 },
+                x: { grid: { display: false }, ticks: { display: false } }
             },
             plugins: { legend: { display: false } }
         }
     });
 
-    /**
-     * MODULE: Initialization & Model Loading
-     */
+    // Settings Listeners
+    confidenceSlider.addEventListener('input', (e) => {
+        const value = e.target.value;
+        confidenceValue.textContent = value + '%';
+        AppState.confidenceThreshold = value / 100;
+    });
+
+    speedSelect.addEventListener('change', (e) => {
+        const speed = e.target.value;
+        if (speed === 'fast') AppState.detectionDelay = 200;
+        else if (speed === 'normal') AppState.detectionDelay = 100;
+        else AppState.detectionDelay = 30; // Faster
+    });
+
+    // Initialization
     async function init() {
         try {
-            // Load COCO-SSD model
+            console.log("Loading model...");
             AppState.model = await cocoSsd.load();
             
-            // Update UI
             loader.style.display = 'none';
-            video.style.display = 'block';
             statusBadge.textContent = "System Ready";
             statusBadge.classList.add('ready');
             
             btnWebcam.disabled = false;
             uploadInput.disabled = false;
             
-            console.log("Model loaded successfully");
+            addLog("System initialized successfully", "success");
         } catch (error) {
             console.error("Error loading model:", error);
             statusBadge.textContent = "Error Loading Model";
+            loader.innerHTML = `<p style="color:red">Failed to load AI Model.<br>Check internet connection.</p>`;
+            addLog("Failed to load AI model", "error");
         }
     }
 
-    /**
-     * MODULE: Video Handling
-     */
+    // Camera Handler
     btnWebcam.addEventListener('click', async () => {
-        stopVideo(); // Stop any existing source
+        stopVideo();
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { width: 640, height: 480 } 
-            });
+            // Use 'ideal' so it works on mobiles that don't support exactly 1280x720
+            const constraints = { 
+                video: { 
+                    width: { ideal: 1280 }, 
+                    height: { ideal: 720 },
+                    facingMode: "environment" // Uses back camera on phones
+                } 
+            };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
             video.srcObject = stream;
             AppState.currentStream = stream;
             
@@ -314,9 +596,11 @@
             };
         } catch (err) {
             alert("Error accessing webcam: " + err.message);
+            addLog("Webcam access denied: " + err.message, "error");
         }
     });
 
+    // Upload Handler
     uploadInput.addEventListener('change', (e) => {
         if (e.target.files && e.target.files[0]) {
             stopVideo();
@@ -324,6 +608,7 @@
             video.srcObject = null;
             video.src = fileURL;
             video.loop = true;
+            video.muted = true; // Required to autoplay on many browsers
             
             video.onloadedmetadata = () => {
                 video.play();
@@ -333,11 +618,20 @@
     });
 
     btnStop.addEventListener('click', stopVideo);
+    btnScreenshot.addEventListener('click', takeScreenshot);
+    btnRecord.addEventListener('click', toggleRecording);
 
     function stopVideo() {
         AppState.isVideoPlaying = false;
         btnWebcam.disabled = false;
+        uploadInput.disabled = false;
         btnStop.disabled = true;
+        btnScreenshot.disabled = true;
+        btnRecord.disabled = true;
+        
+        if (AppState.isRecording) {
+            stopRecording();
+        }
         
         if (video.srcObject) {
             const tracks = video.srcObject.getTracks();
@@ -347,94 +641,215 @@
         video.pause();
         video.src = "";
         
-        // Clear Canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         cancelAnimationFrame(AppState.detectionInterval);
         clearInterval(AppState.chartInterval);
+        clearInterval(AppState.sessionTimer);
+        
+        video.style.display = 'none';
+        loader.style.display = 'flex'; // Reset wrapper
+        loader.innerHTML = "<p>Select Input Source</p>";
+        
+        videoInfo.style.display = 'none';
+        addLog("Monitoring stopped", "info");
+        
+        // Reset UI
+        alertBox.classList.remove('show');
+        alertIndicator.classList.remove('active');
     }
 
-    /**
-     * MODULE: Detection Logic
-     */
     function startDetection() {
         AppState.isVideoPlaying = true;
+        AppState.sessionStart = Date.now();
+        AppState.maxCount = 0;
+        AppState.totalDetections = 0;
+        AppState.history = [];
+        AppState.frameCount = 0;
+        
         btnWebcam.disabled = true;
+        uploadInput.disabled = true;
         btnStop.disabled = false;
+        btnScreenshot.disabled = false;
+        btnRecord.disabled = false;
 
-        // Set canvas dimensions to match video
+        loader.style.display = 'none';
+        video.style.display = 'block';
+
+        // IMPORTANT: Set canvas internal resolution to match video resolution
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
+        
+        // IMPORTANT: Set canvas CSS width/height to match the displayed video size
+        // This fixes the "offset box" issue
+        updateCanvasSize();
+        window.addEventListener('resize', updateCanvasSize);
+        
+        videoInfo.style.display = 'block';
+        resInfo.textContent = `${video.videoWidth}x${video.videoHeight}`;
 
         detectFrame();
         
-        // Start logging data to chart every 2 seconds
         AppState.chartInterval = setInterval(updateDashboard, 2000);
+        AppState.sessionTimer = setInterval(updateSessionTime, 1000);
+        
+        addLog("Monitoring started", "success");
+    }
+
+    function updateCanvasSize() {
+        if(video.style.display !== 'none') {
+            canvas.style.width = video.clientWidth + 'px';
+            canvas.style.height = video.clientHeight + 'px';
+        }
     }
 
     async function detectFrame() {
         if (!AppState.isVideoPlaying) return;
 
-        // Detect objects
-        const predictions = await AppState.model.detect(video);
+        // Ensure video is ready
+        if (video.readyState === 4) {
+            try {
+                const predictions = await AppState.model.detect(video);
+                
+                // Filter specifically for 'person' class
+                const people = predictions.filter(p => 
+                    p.class === 'person' && p.score >= AppState.confidenceThreshold
+                );
+                const count = people.length;
 
-        // Filter for 'person' class only
-        const people = predictions.filter(p => p.class === 'person');
-        const count = people.length;
+                AppState.lastCount = count;
+                AppState.totalDetections += count; // Note: This adds every frame, might be huge number
+                
+                if (count > AppState.maxCount) {
+                    AppState.maxCount = count;
+                    maxCountDisplay.textContent = count;
+                }
 
-        // Update State
-        AppState.lastCount = count;
+                renderPredictions(people);
+                updateUI(count);
+                updateFPS();
+                checkAlert(count);
+            } catch (e) {
+                console.warn("Detection error (frame skipped):", e);
+            }
+        }
 
-        // Draw
-        renderPredictions(people);
-        updateUI(count);
-
-        // Loop
-        AppState.detectionInterval = requestAnimationFrame(detectFrame);
+        // Use timeout to control FPS/CPU usage based on speed setting
+        setTimeout(() => {
+            if (AppState.isVideoPlaying) {
+                AppState.detectionInterval = requestAnimationFrame(detectFrame);
+            }
+        }, AppState.detectionDelay);
     }
 
     function renderPredictions(predictions) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.font = '16px sans-serif';
+        
+        // Setup text styles once
+        ctx.font = 'bold 16px Arial';
         ctx.textBaseline = 'top';
 
-        predictions.forEach(prediction => {
+        predictions.forEach((prediction, idx) => {
             const [x, y, width, height] = prediction.bbox;
 
-            // Draw bounding box
+            // Draw Box
             ctx.strokeStyle = '#00ff9d';
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 3;
             ctx.strokeRect(x, y, width, height);
 
-            // Draw label background
-            ctx.fillStyle = '#00ff9d';
-            const textWidth = ctx.measureText(`Person: ${Math.round(prediction.score*100)}%`).width;
-            ctx.fillRect(x, y, textWidth + 10, 20);
+            // Draw Label Background
+            const score = Math.round(prediction.score * 100);
+            const label = `Person: ${score}%`;
+            const textWidth = ctx.measureText(label).width;
+            
+            ctx.fillStyle = 'rgba(0, 255, 157, 0.8)';
+            ctx.fillRect(x, y - 25, textWidth + 10, 25);
 
-            // Draw text
+            // Draw Label Text
             ctx.fillStyle = '#000000';
-            ctx.fillText(`Person: ${Math.round(prediction.score*100)}%`, x + 5, y + 2);
+            ctx.fillText(label, x + 5, y - 21);
         });
     }
 
     function updateUI(count) {
         liveCountDisplay.textContent = count;
-        if (count > 0) {
-            liveCountDisplay.style.color = '#ff4d4d'; // Red if people detected
+        if (count >= parseInt(thresholdInput.value)) {
+            liveCountDisplay.style.color = '#ff4d4d'; // Red
         } else {
-            liveCountDisplay.style.color = '#00ff9d'; // Green if safe
+            liveCountDisplay.style.color = '#00ff9d'; // Green
+        }
+        
+        // Since we add detections every frame, let's just show detections added in history for a sane number
+        // or keep current cumulative logic
+        totalDetectionsDisplay.textContent = AppState.totalDetections; 
+    }
+
+    function updateFPS() {
+        AppState.frameCount++;
+        const now = Date.now();
+        const elapsed = now - AppState.lastFrameTime;
+        
+        if (elapsed >= 1000) {
+            const fps = Math.round((AppState.frameCount * 1000) / elapsed);
+            fpsCounter.textContent = fps;
+            AppState.frameCount = 0;
+            AppState.lastFrameTime = now;
         }
     }
 
-    /**
-     * MODULE: Dashboard & Logging
-     */
+    function checkAlert(count) {
+        const threshold = parseInt(thresholdInput.value);
+        
+        if (count >= threshold) {
+            alertBox.classList.add('show');
+            alertIndicator.classList.add('active');
+            alertText.textContent = 'ALERT!';
+            alertText.style.color = 'var(--danger-color)';
+            
+            if (soundToggle.checked) {
+                playAlertSound();
+            }
+        } else {
+            alertBox.classList.remove('show');
+            alertIndicator.classList.remove('active');
+            alertText.textContent = 'Monitoring';
+            alertText.style.color = 'var(--text-color)';
+        }
+    }
+
+    function playAlertSound() {
+        const now = Date.now();
+        // Cooldown: Only play sound every 2 seconds
+        if (now - AppState.lastAlertTime < 2000) return;
+        
+        AppState.lastAlertTime = now;
+
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        // Two-tone siren
+        oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+        oscillator.frequency.linearRampToValueAtTime(600, audioContext.currentTime + 0.1);
+        oscillator.frequency.linearRampToValueAtTime(800, audioContext.currentTime + 0.2);
+        
+        oscillator.type = 'square';
+        
+        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+        
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.5);
+    }
+
     function updateDashboard() {
         const now = new Date();
         const timeLabel = now.getHours() + ":" + String(now.getMinutes()).padStart(2, '0') + ":" + String(now.getSeconds()).padStart(2, '0');
 
-        // Update Chart
         const chart = trafficChart;
-        if (chart.data.labels.length > 10) {
+        if (chart.data.labels.length > 20) {
             chart.data.labels.shift();
             chart.data.datasets[0].data.shift();
         }
@@ -442,22 +857,232 @@
         chart.data.datasets[0].data.push(AppState.lastCount);
         chart.update();
 
-        // Add Log Entry only if count changes or randomly to keep it alive
-        if (AppState.lastCount > 0) {
-            const entry = document.createElement('div');
-            entry.className = 'log-entry';
-            entry.innerHTML = `<span class="log-time">[${timeLabel}]</span> Detected <strong>${AppState.lastCount}</strong> person(s).`;
-            logArea.prepend(entry);
-            
-            // Keep log clean
-            if (logArea.childElementCount > 50) logArea.lastChild.remove();
+        AppState.history.push(AppState.lastCount);
+        const avg = AppState.history.length > 0 
+            ? Math.round(AppState.history.reduce((a,b) => a+b, 0) / AppState.history.length)
+            : 0;
+        avgCountDisplay.textContent = avg;
+
+        if (AppState.lastCount >= parseInt(thresholdInput.value)) {
+            addLog(`Threshold exceeded: ${AppState.lastCount} people`, 'alert');
         }
     }
 
-    // Run Initialization
-    init();
+    function updateSessionTime() {
+        if (!AppState.sessionStart) return;
+        
+        const elapsed = Math.floor((Date.now() - AppState.sessionStart) / 1000);
+        const minutes = Math.floor(elapsed / 60);
+        const seconds = elapsed % 60;
+        sessionTimeDisplay.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
 
+    function addLog(message, type = 'info') {
+        const now = new Date();
+        const timeLabel = now.getHours() + ":" + String(now.getMinutes()).padStart(2, '0') + ":" + String(now.getSeconds()).padStart(2, '0');
+        
+        // Deduplicate rapid logs
+        if (logArea.firstChild && logArea.firstChild.innerText.includes(message) && type === 'alert') {
+            return;
+        }
+
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        
+        let className = '';
+        let icon = 'ℹ️';
+        
+        if (type === 'alert') { className = 'log-alert'; icon = '⚠️'; }
+        else if (type === 'error') { className = 'log-alert'; icon = '❌'; }
+        else if (type === 'success') { className = 'log-success'; icon = '✅'; }
+        else if (type === 'warning') { className = 'log-warning'; icon = '⚡'; }
+        
+        entry.innerHTML = `<span class="log-time">[${timeLabel}]</span> <span class="${className}">${icon} ${message}</span>`;
+        logArea.prepend(entry);
+        
+        if (logArea.childElementCount > 50) logArea.lastChild.remove();
+    }
+
+    function takeScreenshot() {
+        // Create a canvas to merge video and overlay
+        const screenshotCanvas = document.createElement('canvas');
+        screenshotCanvas.width = video.videoWidth;
+        screenshotCanvas.height = video.videoHeight;
+        const sCtx = screenshotCanvas.getContext('2d');
+        
+        // Draw video frame
+        sCtx.drawImage(video, 0, 0);
+        // Draw detections overlay
+        sCtx.drawImage(canvas, 0, 0);
+        
+        screenshotCanvas.toBlob((blob) => {
+            const url = URL.createObjectURL(blob);
+            const now = new Date();
+            const timestamp = now.toLocaleTimeString();
+            
+            AppState.screenshots.push({ url, timestamp, count: AppState.lastCount });
+            
+            updateScreenshotList();
+            addLog(`Screenshot captured (${AppState.lastCount} people)`, 'success');
+        }, 'image/png');
+    }
+
+    function updateScreenshotList() {
+        if (AppState.screenshots.length === 0) {
+            screenshotList.innerHTML = '<p style="color:#888; font-size:0.85rem; text-align:center;">No screenshots yet</p>';
+            return;
+        }
+        
+        screenshotList.innerHTML = '';
+        
+        AppState.screenshots.slice().reverse().forEach((shot, idx) => {
+            const item = document.createElement('div');
+            item.className = 'screenshot-item';
+            
+            const img = document.createElement('img');
+            img.src = shot.url;
+            img.className = 'screenshot-thumb';
+            
+            const info = document.createElement('div');
+            info.style.flex = '1';
+            info.innerHTML = `<div style="font-size:0.85rem;">${shot.timestamp}</div><div style="font-size:0.75rem; color:#888;">${shot.count} people</div>`;
+            
+            const downloadLink = document.createElement('a');
+            downloadLink.href = shot.url;
+            downloadLink.download = `surveillance_${Date.now()}.png`;
+            downloadLink.className = 'download-link';
+            downloadLink.textContent = '⬇ Save';
+            
+            item.appendChild(img);
+            item.appendChild(info);
+            item.appendChild(downloadLink);
+            screenshotList.appendChild(item);
+        });
+    }
+
+    function toggleRecording() {
+        if (!AppState.isRecording) {
+            startRecording();
+        } else {
+            stopRecording();
+        }
+    }
+
+    function startRecording() {
+        // Find supported mime type
+        const mimeTypes = [
+            'video/webm;codecs=vp9',
+            'video/webm;codecs=vp8',
+            'video/webm',
+            'video/mp4'
+        ];
+        const mimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type));
+
+        if (!mimeType) {
+            addLog("Video recording not supported on this browser", "error");
+            return;
+        }
+
+        const recordCanvas = document.createElement('canvas');
+        recordCanvas.width = video.videoWidth;
+        recordCanvas.height = video.videoHeight;
+        const recordCtx = recordCanvas.getContext('2d');
+        
+        // Capture stream at 30fps
+        const stream = recordCanvas.captureStream(30);
+        AppState.mediaRecorder = new MediaRecorder(stream, { mimeType });
+        
+        AppState.recordedChunks = [];
+        
+        AppState.mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+                AppState.recordedChunks.push(e.data);
+            }
+        };
+        
+        AppState.mediaRecorder.onstop = () => {
+            const blob = new Blob(AppState.recordedChunks, { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+            a.download = `surveillance_recording_${Date.now()}.${ext}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            addLog('Recording saved successfully', 'success');
+        };
+        
+        const recordFrame = () => {
+            if (!AppState.isRecording) return;
+            
+            recordCtx.drawImage(video, 0, 0);
+            recordCtx.drawImage(canvas, 0, 0);
+            
+            requestAnimationFrame(recordFrame);
+        };
+        
+        AppState.mediaRecorder.start();
+        AppState.isRecording = true;
+        btnRecord.textContent = '⏹ Stop Rec';
+        btnRecord.classList.add('recording');
+        recordFrame();
+        
+        addLog(`Recording started (${mimeType})`, 'success');
+    }
+
+    function stopRecording() {
+        if (AppState.mediaRecorder && AppState.isRecording) {
+            AppState.mediaRecorder.stop();
+            AppState.isRecording = false;
+            btnRecord.textContent = '⏺ Record';
+            btnRecord.classList.remove('recording');
+        }
+    }
+
+    // Start everything
+    init();
 </script>
 
 </body>
 </html>
+</body>
+<footer class="project-footer">
+    <h3>👥 Project Team</h3>
+    <ul>
+        <li><strong>Anant Mishra</strong> — Leader</li>
+        <li><strong>Mohammad Areeb</strong> — Developer</li>
+        <li><strong>Yug Jain</strong> — Researcher</li>
+        <li><strong>Ayush Kushwaha</strong> — Slide Designer</li>
+    </ul>
+</footer>
+<style>
+    /* existing CSS above */
+
+    .project-footer {
+        background: linear-gradient(180deg, #0f1a33, #0a1020);
+        border-top: 2px solid var(--accent-color);
+        padding: 20px;
+        text-align: center;
+        margin-top: auto;
+    }
+
+    .project-footer h3 {
+        margin: 0 0 10px;
+        font-size: 1.1rem;
+        color: var(--accent-color);
+        text-shadow: 0 0 8px rgba(0,180,255,0.5);
+    }
+
+    .project-footer ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .project-footer li {
+        font-size: 0.9rem;
+        color: var(--text-color);
+        margin: 5px 0;
+    }
+</style>
